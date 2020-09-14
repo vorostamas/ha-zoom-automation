@@ -4,7 +4,8 @@ from logging import getLogger
 from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
 from homeassistant.const import CONF_CLIENT_ID, CONF_CLIENT_SECRET
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_entry_oauth2_flow
+from homeassistant.helpers import config_entry_oauth2_flow, entity
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.typing import ConfigType
 import voluptuous as vol
 
@@ -18,9 +19,11 @@ from .config_flow import ZoomOAuth2FlowHandler
 from .const import (
     API,
     CONF_VERIFICATION_TOKEN,
+    CONTACTS,
     DOMAIN,
     OAUTH2_AUTHORIZE,
     OAUTH2_TOKEN,
+    UNSUB,
     USER_PROFILE_COORDINATOR,
     ZOOM_SCHEMA,
 )
@@ -56,6 +59,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType):
     return True
 
 
+async def _async_send_update_options_signal(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> None:
+    """Send update event when Zoom config entry is updated."""
+    async_dispatcher_send(hass, config_entry.entry_id, config_entry)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Set up Zoom from a config entry."""
     hass.data[DOMAIN].setdefault(entry.entry_id, {})
@@ -80,8 +90,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     api = ZoomAPI(config_entry_oauth2_flow.OAuth2Session(hass, entry, implementation))
     coordinator = ZoomUserProfileDataUpdateCoordinator(hass, api)
     await coordinator.async_refresh()
-    hass.data[DOMAIN][entry.entry_id][USER_PROFILE_COORDINATOR] = coordinator
-    hass.data[DOMAIN][entry.entry_id][API] = api
+
+    unsub = entry.add_update_listener(_async_send_update_options_signal)
+    hass.data[DOMAIN][entry.entry_id].update(
+        {
+            USER_PROFILE_COORDINATOR: coordinator,
+            API: api,
+            UNSUB: [unsub],
+            CONTACTS: [],
+        }
+    )
 
     # Register view
     hass.http.register_view(ZoomWebhookRequestView(entry.data[CONF_VERIFICATION_TOKEN]))
@@ -96,6 +114,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry):
     """Unload a config entry."""
+    for unsub in hass.data[DOMAIN][config_entry.entry_id][UNSUB]:
+        unsub()
+
+    for entity in hass.data[DOMAIN][config_entry.entry_id][CONTACTS]:
+        hass.async_create_task(entity.async_remove())
+
     hass.data[DOMAIN].pop(config_entry.entry_id)
 
     return True
