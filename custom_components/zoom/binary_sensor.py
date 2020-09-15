@@ -1,4 +1,5 @@
 """Sensor platform for Zoom."""
+import asyncio
 from datetime import timedelta
 from logging import getLogger
 from typing import Any, Dict, List, Optional
@@ -44,29 +45,42 @@ async def async_setup_entry(
     entity = ZoomAuthenticatedUserBinarySensor(hass, config_entry)
     async_add_entities([entity], update_before_add=True)
 
-    for id in config_entry.options.get(CONF_CONTACT_IDS_TO_MONITOR, []):
-        entity = ZoomContactUserBinarySensor(hass, config_entry, id)
-        async_add_entities([entity], update_before_add=True)
-        hass.data[DOMAIN][config_entry.entry_id][CONTACTS].append(entity)
+    entities = [
+        ZoomContactUserBinarySensor(hass, config_entry, id)
+        for id in config_entry.options.get(CONF_CONTACT_IDS_TO_MONITOR, [])
+    ]
+    if entities:
+        async_add_entities(entities, update_before_add=True)
+        hass.data[DOMAIN][config_entry.entry_id][CONTACTS].extend(entities)
 
+    @callback
     async def update_contact_entities(entry: ConfigEntry) -> None:
         """Update contact entities if update signal comes from config entry."""
         ids_to_monitor = entry.options.get(CONF_CONTACT_IDS_TO_MONITOR, [])
         existing_ids = []
+        entities_to_remove = []
+        await asyncio.sleep(0)
 
         # First we identify which existing entities to remove and which to keep
         for entity in hass.data[DOMAIN][entry.entry_id][CONTACTS]:
             if entity.id not in ids_to_monitor:
                 hass.async_create_task(entity.async_remove())
-                hass.data[DOMAIN][entry.entry_id][CONTACTS].remove(entity)
+                entities_to_remove.append(entity)
             else:
                 existing_ids.append(entity.id)
 
+        # Then we remove entities that are no longer needed
+        for entity in entities_to_remove:
+            hass.data[DOMAIN][entry.entry_id][CONTACTS].remove(entity)
+
         # Then we add the new entities that don't already exist
-        for id in list(set(ids_to_monitor) - set(existing_ids)):
-            entity = ZoomContactUserBinarySensor(hass, entry, id)
-            async_add_entities([entity], update_before_add=True)
-            hass.data[DOMAIN][entry.entry_id][CONTACTS].append(entity)
+        entities = [
+            ZoomContactUserBinarySensor(hass, entry, id)
+            for id in list(set(ids_to_monitor) - set(existing_ids))
+        ]
+        if entities:
+            async_add_entities(entities, update_before_add=True)
+            hass.data[DOMAIN][entry.entry_id][CONTACTS].extend(entities)
 
     hass.data[DOMAIN][config_entry.entry_id][UNSUB].append(
         async_dispatcher_connect(hass, config_entry.entry_id, update_contact_entities)
