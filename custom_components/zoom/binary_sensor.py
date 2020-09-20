@@ -11,7 +11,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, STATE_OFF, STATE_ON
-from homeassistant.core import Event
+from homeassistant.core import Event, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import HomeAssistantType
@@ -30,6 +30,7 @@ from .const import (
     DOMAIN,
     HA_ZOOM_EVENT,
     UNSUB,
+    USER_PROFILE_COORDINATOR,
 )
 
 _LOGGER = getLogger(__name__)
